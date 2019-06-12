@@ -25,7 +25,7 @@ constexpr int RECT_HEIGHT(const RECT* const pRect)
 }
 
 NonClientIslandWindow::NonClientIslandWindow() noexcept :
-    IslandWindow{ },
+    IslandWindow{},
     _nonClientInteropWindowHandle{ nullptr },
     _nonClientRootGrid{ nullptr },
     _nonClientSource{ nullptr },
@@ -68,10 +68,8 @@ void NonClientIslandWindow::Initialize()
 void NonClientIslandWindow::SetNonClientContent(winrt::Windows::UI::Xaml::UIElement content)
 {
     _nonClientRootGrid.Children().Clear();
-    ApplyCorrection(_scale.ScaleX());
     _nonClientRootGrid.Children().Append(content);
 }
-
 
 // Method Description:
 // - Set the height we expect to reserve for the non-client content.
@@ -91,18 +89,19 @@ void NonClientIslandWindow::SetNonClientHeight(const int contentHeight) noexcept
 //   content, in window coordinates.
 Viewport NonClientIslandWindow::GetTitlebarContentArea() const noexcept
 {
-    const auto dpi = GetDpiForWindow(_window);
-    const double scale = static_cast<double>(dpi) / static_cast<double>(USER_DEFAULT_SCREEN_DPI);
+    const auto scale = GetCurrentDpiScale();
 
     const auto titlebarContentHeight = _titlebarUnscaledContentHeight * scale;
     const auto titlebarMarginRight = _titlebarMarginRight;
 
-    auto titlebarWidth = _currentWidth - (_windowMarginSides + titlebarMarginRight);
+    const auto physicalSize = GetPhysicalSize();
+    const auto clientWidth = physicalSize.cx;
+
+    auto titlebarWidth = clientWidth - (_windowMarginSides + titlebarMarginRight);
     // Adjust for maximized margins
     titlebarWidth -= (_maximizedMargins.cxLeftWidth + _maximizedMargins.cxRightWidth);
 
     const auto titlebarHeight = titlebarContentHeight - (_titlebarMarginTop + _titlebarMarginBottom);
-
 
     COORD titlebarOrigin = { static_cast<short>(_windowMarginSides),
                              static_cast<short>(_titlebarMarginTop) };
@@ -133,8 +132,9 @@ Viewport NonClientIslandWindow::GetClientContentArea() const noexcept
     COORD clientOrigin = { static_cast<short>(margins.cxLeftWidth),
                            static_cast<short>(margins.cyTopHeight) };
 
-    auto clientWidth = _currentWidth;
-    auto clientHeight = _currentHeight;
+    const auto physicalSize = GetPhysicalSize();
+    auto clientWidth = physicalSize.cx;
+    auto clientHeight = physicalSize.cy;
 
     // If we're maximized, we don't want to use the frame as our margins,
     // instead we want to use the margins from the maximization. If we included
@@ -170,18 +170,25 @@ void NonClientIslandWindow::OnSize()
     auto titlebarArea = GetTitlebarContentArea();
 
     // update the interop window size
-    SetWindowPos(_interopWindowHandle, 0,
+    SetWindowPos(_interopWindowHandle,
+                 0,
                  clientArea.Left(),
                  clientArea.Top(),
                  clientArea.Width(),
                  clientArea.Height(),
                  SWP_SHOWWINDOW);
 
-    _rootGrid.Width(clientArea.Width());
-    _rootGrid.Height(clientArea.Height());
+    if (_rootGrid)
+    {
+        const SIZE physicalSize{ clientArea.Width(), clientArea.Height() };
+        const auto logicalSize = GetLogicalSize(physicalSize);
+        _rootGrid.Width(logicalSize.Width);
+        _rootGrid.Height(logicalSize.Height);
+    }
 
     // update the interop window size
-    SetWindowPos(_nonClientInteropWindowHandle, 0,
+    SetWindowPos(_nonClientInteropWindowHandle,
+                 0,
                  titlebarArea.Left(),
                  titlebarArea.Top(),
                  titlebarArea.Width(),
@@ -202,7 +209,7 @@ void NonClientIslandWindow::OnSize()
 // NOTE:
 // Largely taken from code on:
 // https://docs.microsoft.com/en-us/windows/desktop/dwm/customframe
-LRESULT NonClientIslandWindow::HitTestNCA(POINT ptMouse) const noexcept
+[[nodiscard]] LRESULT NonClientIslandWindow::HitTestNCA(POINT ptMouse) const noexcept
 {
     // Get the window rectangle.
     RECT rcWindow = BaseWindow::GetWindowRect();
@@ -241,13 +248,14 @@ LRESULT NonClientIslandWindow::HitTestNCA(POINT ptMouse) const noexcept
         uCol = 2; // right side
     }
 
+    // clang-format off
     // Hit test (HTTOPLEFT, ... HTBOTTOMRIGHT)
-    LRESULT hitTests[3][3] =
-    {
-        { HTTOPLEFT,    fOnResizeBorder ? HTTOP : HTCAPTION,    HTTOPRIGHT },
-        { HTLEFT,       HTNOWHERE,     HTRIGHT },
-        { HTBOTTOMLEFT, HTBOTTOM, HTBOTTOMRIGHT },
+    LRESULT hitTests[3][3] = {
+        { HTTOPLEFT,    fOnResizeBorder ? HTTOP : HTCAPTION, HTTOPRIGHT },
+        { HTLEFT,       HTNOWHERE,                           HTRIGHT },
+        { HTBOTTOMLEFT, HTBOTTOM,                            HTBOTTOMRIGHT },
     };
+    // clang-format on
 
     return hitTests[uRow][uCol];
 }
@@ -262,7 +270,7 @@ MARGINS NonClientIslandWindow::GetFrameMargins() const noexcept
 {
     const auto titlebarView = GetTitlebarContentArea();
 
-    MARGINS margins{0};
+    MARGINS margins{ 0 };
     margins.cxLeftWidth = _windowMarginSides;
     margins.cxRightWidth = _windowMarginSides;
     margins.cyBottomHeight = _windowMarginBottom;
@@ -277,7 +285,7 @@ MARGINS NonClientIslandWindow::GetFrameMargins() const noexcept
 // - <none>
 // Return Value:
 // - the HRESULT returned by DwmExtendFrameIntoClientArea.
-HRESULT NonClientIslandWindow::_UpdateFrameMargins() const noexcept
+[[nodiscard]] HRESULT NonClientIslandWindow::_UpdateFrameMargins() const noexcept
 {
     // Get the size of the borders we want to use. The sides and bottom will
     // just be big enough for resizing, but the top will be as big as we need
@@ -305,8 +313,8 @@ HRESULT NonClientIslandWindow::_UpdateFrameMargins() const noexcept
 //   origin in pixels. Measures the outer edges of the potential window.
 // NOTE:
 // Heavily taken from WindowMetrics::GetMaxWindowRectInPixels in conhost.
-RECT NonClientIslandWindow::GetMaxWindowRectInPixels(const RECT * const prcSuggested,
-                                                     _Out_opt_ UINT * pDpiSuggested)
+RECT NonClientIslandWindow::GetMaxWindowRectInPixels(const RECT* const prcSuggested,
+                                                     _Out_opt_ UINT* pDpiSuggested)
 {
     // prepare rectangle
     RECT rc = *prcSuggested;
@@ -380,9 +388,9 @@ RECT NonClientIslandWindow::GetMaxWindowRectInPixels(const RECT * const prcSugge
 // Return Value:
 // - The return value is the result of the message processing and depends on the
 //   message sent.
-LRESULT NonClientIslandWindow::MessageHandler(UINT const message,
-                                              WPARAM const wParam,
-                                              LPARAM const lParam) noexcept
+[[nodiscard]] LRESULT NonClientIslandWindow::MessageHandler(UINT const message,
+                                                            WPARAM const wParam,
+                                                            LPARAM const lParam) noexcept
 {
     LRESULT lRet = 0;
 
@@ -407,11 +415,11 @@ LRESULT NonClientIslandWindow::MessageHandler(UINT const message,
         if (wParam == TRUE && lParam)
         {
             // Calculate new NCCALCSIZE_PARAMS based on custom NCA inset.
-            NCCALCSIZE_PARAMS *pncsp = reinterpret_cast<NCCALCSIZE_PARAMS*>(lParam);
+            NCCALCSIZE_PARAMS* pncsp = reinterpret_cast<NCCALCSIZE_PARAMS*>(lParam);
 
-            pncsp->rgrc[0].left   = pncsp->rgrc[0].left   + 0;
-            pncsp->rgrc[0].top    = pncsp->rgrc[0].top    + 0;
-            pncsp->rgrc[0].right  = pncsp->rgrc[0].right  - 0;
+            pncsp->rgrc[0].left = pncsp->rgrc[0].left + 0;
+            pncsp->rgrc[0].top = pncsp->rgrc[0].top + 0;
+            pncsp->rgrc[0].right = pncsp->rgrc[0].right - 0;
             pncsp->rgrc[0].bottom = pncsp->rgrc[0].bottom - 0;
 
             return 0;
@@ -428,7 +436,7 @@ LRESULT NonClientIslandWindow::MessageHandler(UINT const message,
         // Handle hit testing in the NCA if not handled by DwmDefWindowProc.
         if (lRet == 0)
         {
-            lRet = HitTestNCA({ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)});
+            lRet = HitTestNCA({ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) });
 
             if (lRet != HTNOWHERE)
             {
@@ -456,7 +464,6 @@ LRESULT NonClientIslandWindow::MessageHandler(UINT const message,
             break;
         }
     }
-
     }
 
     return IslandWindow::MessageHandler(message, wParam, lParam);
@@ -482,7 +489,7 @@ void NonClientIslandWindow::_HandleActivateWindow()
     // _titlebarUnscaledContentHeight is set with SetNonClientHeight by the app
     // hosting us.
 
-    _UpdateFrameMargins();
+    THROW_IF_FAILED(_UpdateFrameMargins());
 }
 
 // Method Description:
@@ -599,9 +606,9 @@ bool NonClientIslandWindow::_HandleWindowPosChanging(WINDOWPOS* const windowPos)
         // change, so we're likely to shrink the window too much or worse yet,
         // keep it from moving entirely. We'll get a WM_DPICHANGED, resize the
         // window, and then process the restriction in a few window messages.
-        if ( ((int)dpiOfMaximum == _currentDpi) &&
-             ( (suggestedWidth > maxWidth) ||
-               (suggestedHeight > maxHeight) ) )
+        if (((int)dpiOfMaximum == _currentDpi) &&
+            ((suggestedWidth > maxWidth) ||
+             (suggestedHeight > maxHeight)))
         {
             auto offset = 0;
             // Determine which side of the window to use for the offset
@@ -626,13 +633,13 @@ bool NonClientIslandWindow::_HandleWindowPosChanging(WINDOWPOS* const windowPos)
             _maximizedMargins.cyBottomHeight = -offset;
 
             _isMaximized = true;
-            _UpdateFrameMargins();
+            THROW_IF_FAILED(_UpdateFrameMargins());
         }
     }
     else
     {
         // Clear our maximization state
-        _maximizedMargins = {0};
+        _maximizedMargins = { 0 };
 
         // Immediately after resoring down, don't update our frame margins. If
         // you do this here, then a small gap will appear between the titlebar
@@ -640,7 +647,7 @@ bool NonClientIslandWindow::_HandleWindowPosChanging(WINDOWPOS* const windowPos)
         // keep this here _in general_ for dragging across DPI boundaries.
         if (!_isMaximized)
         {
-            _UpdateFrameMargins();
+            THROW_IF_FAILED(_UpdateFrameMargins());
         }
 
         _isMaximized = false;

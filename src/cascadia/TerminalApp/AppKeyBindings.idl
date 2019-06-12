@@ -17,12 +17,13 @@ namespace TerminalApp
         NewTabProfile6,
         NewTabProfile7,
         NewTabProfile8,
-        NewTabProfile9,
         NewWindow,
         CloseWindow,
         CloseTab,
         NextTab,
         PrevTab,
+        SplitVertical,
+        SplitHorizontal,
         SwitchToTab0,
         SwitchToTab1,
         SwitchToTab2,
@@ -32,7 +33,6 @@ namespace TerminalApp
         SwitchToTab6,
         SwitchToTab7,
         SwitchToTab8,
-        SwitchToTab9,
         IncreaseFontSize,
         DecreaseFontSize,
         ScrollUp,
@@ -51,6 +51,8 @@ namespace TerminalApp
     delegate void CloseTabEventArgs();
     delegate void NextTabEventArgs();
     delegate void PrevTabEventArgs();
+    delegate void SplitVerticalEventArgs();
+    delegate void SplitHorizontalEventArgs();
     delegate void SwitchToTabEventArgs(Int32 profileIndex);
     delegate void IncreaseFontSizeEventArgs();
     delegate void DecreaseFontSizeEventArgs();
@@ -66,6 +68,7 @@ namespace TerminalApp
         AppKeyBindings();
 
         void SetKeyBinding(ShortcutAction action, Microsoft.Terminal.Settings.KeyChord chord);
+        Microsoft.Terminal.Settings.KeyChord GetKeyBinding(ShortcutAction action);
 
         event CopyTextEventArgs CopyText;
         event PasteTextEventArgs PasteText;
@@ -77,6 +80,8 @@ namespace TerminalApp
         event SwitchToTabEventArgs SwitchToTab;
         event NextTabEventArgs NextTab;
         event PrevTabEventArgs PrevTab;
+        event SplitVerticalEventArgs SplitVertical;
+        event SplitHorizontalEventArgs SplitHorizontal;
         event IncreaseFontSizeEventArgs IncreaseFontSize;
         event DecreaseFontSizeEventArgs DecreaseFontSize;
         event ScrollUpEventArgs ScrollUp;
