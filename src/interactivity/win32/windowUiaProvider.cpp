@@ -2,65 +2,30 @@
 // Licensed under the MIT license.
 #include "precomp.h"
 
+#include "screenInfoUiaProvider.hpp"
 #include "windowUiaProvider.hpp"
-#include "../types/ScreenInfoUiaProvider.h"
 
+#include "../types/IUiaData.h"
 #include "../host/renderData.hpp"
 #include "../inc/ServiceLocator.hpp"
 
 using namespace Microsoft::Console::Types;
 using namespace Microsoft::Console::Interactivity::Win32;
 
-WindowUiaProvider::WindowUiaProvider(IConsoleWindow* baseWindow) :
-    _pScreenInfoProvider{ nullptr },
-    WindowUiaProviderBase(baseWindow)
+HRESULT WindowUiaProvider::RuntimeClassInitialize(_In_ IConsoleWindow* baseWindow)
 {
-}
+    RETURN_IF_FAILED(WindowUiaProviderBase::RuntimeClassInitialize(baseWindow));
 
-WindowUiaProvider::~WindowUiaProvider()
-{
-    if (_pScreenInfoProvider)
-    {
-        _pScreenInfoProvider->Release();
-    }
-}
+    Globals& g = ServiceLocator::LocateGlobals();
+    CONSOLE_INFORMATION& gci = g.getConsoleInformation();
+    IUiaData* uiaData = &gci.renderData;
 
-WindowUiaProvider* WindowUiaProvider::Create(IConsoleWindow* baseWindow)
-{
-    WindowUiaProvider* pWindowProvider = nullptr;
-    Microsoft::Console::Types::ScreenInfoUiaProvider* pScreenInfoProvider = nullptr;
-    try
-    {
-        pWindowProvider = new WindowUiaProvider(baseWindow);
+    RETURN_IF_FAILED(WRL::MakeAndInitialize<ScreenInfoUiaProvider>(&_pScreenInfoProvider, uiaData, this));
 
-        Globals& g = ServiceLocator::LocateGlobals();
-        CONSOLE_INFORMATION& gci = g.getConsoleInformation();
-        Microsoft::Console::Render::IRenderData* renderData = &gci.renderData;
+    // TODO GitHub #1914: Re-attach Tracing to UIA Tree
+    //Tracing::s_TraceUia(pWindowProvider, ApiCall::Create, nullptr);
 
-        pScreenInfoProvider = new Microsoft::Console::Types::ScreenInfoUiaProvider(renderData, pWindowProvider);
-        pWindowProvider->_pScreenInfoProvider = pScreenInfoProvider;
-
-        // TODO GitHub #1914: Re-attach Tracing to UIA Tree
-        //Tracing::s_TraceUia(pWindowProvider, ApiCall::Create, nullptr);
-
-        return pWindowProvider;
-    }
-    catch (...)
-    {
-        if (nullptr != pWindowProvider)
-        {
-            pWindowProvider->Release();
-        }
-
-        if (nullptr != pScreenInfoProvider)
-        {
-            pScreenInfoProvider->Release();
-        }
-
-        LOG_CAUGHT_EXCEPTION();
-
-        return nullptr;
-    }
+    return S_OK;
 }
 
 [[nodiscard]] HRESULT WindowUiaProvider::SetTextAreaFocus()
@@ -104,8 +69,7 @@ WindowUiaProvider* WindowUiaProvider::Create(IConsoleWindow* baseWindow)
     }
     CATCH_RETURN();
 
-    IRawElementProviderSimple* pProvider = static_cast<IRawElementProviderSimple*>(this);
-    hr = UiaRaiseAutomationEvent(pProvider, id);
+    hr = UiaRaiseAutomationEvent(this, id);
     _signalEventFiring[id] = false;
 
     return hr;
@@ -121,8 +85,7 @@ IFACEMETHODIMP WindowUiaProvider::Navigate(_In_ NavigateDirection direction, _CO
 
     if (direction == NavigateDirection_FirstChild || direction == NavigateDirection_LastChild)
     {
-        *ppProvider = _pScreenInfoProvider;
-        (*ppProvider)->AddRef();
+        RETURN_IF_FAILED(_pScreenInfoProvider.CopyTo(ppProvider));
 
         // signal that the focus changed
         LOG_IF_FAILED(_pScreenInfoProvider->Signal(UIA_AutomationFocusChangedEventId));
@@ -147,8 +110,7 @@ IFACEMETHODIMP WindowUiaProvider::ElementProviderFromPoint(_In_ double /*x*/,
 {
     RETURN_IF_FAILED(_EnsureValidHwnd());
 
-    *ppProvider = _pScreenInfoProvider;
-    (*ppProvider)->AddRef();
+    RETURN_IF_FAILED(_pScreenInfoProvider.CopyTo(ppProvider));
 
     return S_OK;
 }

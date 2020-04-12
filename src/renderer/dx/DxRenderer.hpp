@@ -25,13 +25,21 @@
 
 #include "../../types/inc/Viewport.hpp"
 
+#include <TraceLoggingProvider.h>
+
+TRACELOGGING_DECLARE_PROVIDER(g_hDxRenderProvider);
+
 namespace Microsoft::Console::Render
 {
     class DxEngine final : public RenderEngineBase
     {
     public:
         DxEngine();
-        virtual ~DxEngine() override;
+        ~DxEngine();
+        DxEngine(const DxEngine&) = default;
+        DxEngine(DxEngine&&) = default;
+        DxEngine& operator=(const DxEngine&) = default;
+        DxEngine& operator=(DxEngine&&) = default;
 
         // Used to release device resources so that another instance of
         // conhost can render to the screen (i.e. only one DirectX
@@ -45,7 +53,9 @@ namespace Microsoft::Console::Render
 
         void SetCallback(std::function<void()> pfn);
 
-        ::Microsoft::WRL::ComPtr<IDXGISwapChain1> GetSwapChain() noexcept;
+        void SetRetroTerminalEffects(bool enable) noexcept;
+
+        ::Microsoft::WRL::ComPtr<IDXGISwapChain1> GetSwapChain();
 
         // IRenderEngine Members
         [[nodiscard]] HRESULT Invalidate(const SMALL_RECT* const psrRegion) noexcept override;
@@ -66,7 +76,8 @@ namespace Microsoft::Console::Render
         [[nodiscard]] HRESULT PaintBackground() noexcept override;
         [[nodiscard]] HRESULT PaintBufferLine(std::basic_string_view<Cluster> const clusters,
                                               COORD const coord,
-                                              bool const fTrimLeft) noexcept override;
+                                              bool const fTrimLeft,
+                                              const bool lineWrapped) noexcept override;
 
         [[nodiscard]] HRESULT PaintBufferGridLines(GridLines const lines, COLORREF const color, size_t const cchLine, COORD const coordTarget) noexcept override;
         [[nodiscard]] HRESULT PaintSelection(const SMALL_RECT rect) noexcept override;
@@ -76,7 +87,7 @@ namespace Microsoft::Console::Render
         [[nodiscard]] HRESULT UpdateDrawingBrushes(COLORREF const colorForeground,
                                                    COLORREF const colorBackground,
                                                    const WORD legacyColorAttribute,
-                                                   const bool isBold,
+                                                   const ExtendedAttributes extendedAttrs,
                                                    bool const isSettingDefaultBrushes) noexcept override;
         [[nodiscard]] HRESULT UpdateFont(const FontInfoDesired& fiFontInfoDesired, FontInfo& fiFontInfo) noexcept override;
         [[nodiscard]] HRESULT UpdateDpi(int const iDpi) noexcept override;
@@ -84,7 +95,7 @@ namespace Microsoft::Console::Render
 
         [[nodiscard]] HRESULT GetProposedFont(const FontInfoDesired& fiFontInfoDesired, FontInfo& fiFontInfo, int const iDpi) noexcept override;
 
-        [[nodiscard]] SMALL_RECT GetDirtyRectInChars() noexcept override;
+        [[nodiscard]] std::vector<til::rectangle> GetDirtyArea() override;
 
         [[nodiscard]] HRESULT GetFontSize(_Out_ COORD* const pFontSize) noexcept override;
         [[nodiscard]] HRESULT IsGlyphWideByFont(const std::wstring_view glyph, _Out_ bool* const pResult) noexcept override;
@@ -93,8 +104,12 @@ namespace Microsoft::Console::Render
 
         float GetScaling() const noexcept;
 
+        void SetSelectionBackground(const COLORREF color) noexcept;
+        void SetAntialiasingMode(const D2D1_TEXT_ANTIALIAS_MODE antialiasingMode) noexcept;
+
     protected:
         [[nodiscard]] HRESULT _DoUpdateTitle(_In_ const std::wstring& newTitle) noexcept override;
+        [[nodiscard]] HRESULT _PaintTerminalEffects() noexcept;
 
     private:
         enum class SwapChainMode
@@ -123,6 +138,7 @@ namespace Microsoft::Console::Render
 
         D2D1_COLOR_F _foregroundColor;
         D2D1_COLOR_F _backgroundColor;
+        D2D1_COLOR_F _selectionBackground;
 
         [[nodiscard]] RECT _GetDisplayRect() const noexcept;
 
@@ -133,13 +149,15 @@ namespace Microsoft::Console::Render
         void _InvalidOr(SMALL_RECT sr) noexcept;
         void _InvalidOr(RECT rc) noexcept;
 
-        void _InvalidOffset(POINT pt) noexcept;
+        void _InvalidOffset(POINT pt);
 
         bool _presentReady;
         RECT _presentDirty;
         RECT _presentScroll;
         POINT _presentOffset;
         DXGI_PRESENT_PARAMETERS _presentParams;
+
+        static std::atomic<size_t> _tracelogCount;
 
         static const ULONG s_ulMinCursorHeightPercent = 25;
         static const ULONG s_ulMaxCursorHeightPercent = 100;
@@ -151,6 +169,7 @@ namespace Microsoft::Console::Render
         ::Microsoft::WRL::ComPtr<IDWriteFontFace1> _dwriteFontFace;
         ::Microsoft::WRL::ComPtr<IDWriteTextAnalyzer1> _dwriteTextAnalyzer;
         ::Microsoft::WRL::ComPtr<CustomTextRenderer> _customRenderer;
+        ::Microsoft::WRL::ComPtr<ID2D1StrokeStyle> _strokeStyle;
 
         // Device-Dependent Resources
         bool _haveDeviceResources;
@@ -163,7 +182,30 @@ namespace Microsoft::Console::Render
         ::Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> _d2dBrushBackground;
         ::Microsoft::WRL::ComPtr<IDXGISwapChain1> _dxgiSwapChain;
 
+        // Terminal effects resources.
+        bool _retroTerminalEffects;
+        ::Microsoft::WRL::ComPtr<ID3D11RenderTargetView> _renderTargetView;
+        ::Microsoft::WRL::ComPtr<ID3D11VertexShader> _vertexShader;
+        ::Microsoft::WRL::ComPtr<ID3D11PixelShader> _pixelShader;
+        ::Microsoft::WRL::ComPtr<ID3D11InputLayout> _vertexLayout;
+        ::Microsoft::WRL::ComPtr<ID3D11Buffer> _screenQuadVertexBuffer;
+        ::Microsoft::WRL::ComPtr<ID3D11Buffer> _pixelShaderSettingsBuffer;
+        ::Microsoft::WRL::ComPtr<ID3D11SamplerState> _samplerState;
+        ::Microsoft::WRL::ComPtr<ID3D11Texture2D> _framebufferCapture;
+
+        D2D1_TEXT_ANTIALIAS_MODE _antialiasingMode;
+
+        // DirectX constant buffers need to be a multiple of 16; align to pad the size.
+        __declspec(align(16)) struct
+        {
+            float ScaledScanLinePeriod;
+            float ScaledGaussianSigma;
+#pragma warning(suppress : 4324) // structure was padded due to __declspec(align())
+        } _pixelShaderSettings;
+
         [[nodiscard]] HRESULT _CreateDeviceResources(const bool createSwapChain) noexcept;
+        HRESULT _SetupTerminalEffects();
+        void _ComputePixelShaderSettings() noexcept;
 
         [[nodiscard]] HRESULT _PrepareRenderTarget() noexcept;
 
@@ -192,7 +234,7 @@ namespace Microsoft::Console::Render
 
         [[nodiscard]] std::wstring _GetLocaleName() const;
 
-        [[nodiscard]] std::wstring _GetFontFamilyName(IDWriteFontFamily* const fontFamily,
+        [[nodiscard]] std::wstring _GetFontFamilyName(gsl::not_null<IDWriteFontFamily*> const fontFamily,
                                                       std::wstring& localeName) const;
 
         [[nodiscard]] HRESULT _GetProposedFont(const FontInfoDesired& desired,
@@ -208,6 +250,15 @@ namespace Microsoft::Console::Render
 
         [[nodiscard]] D2D1_COLOR_F _ColorFFromColorRef(const COLORREF color) noexcept;
 
-        [[nodiscard]] static DXGI_RGBA s_RgbaFromColorF(const D2D1_COLOR_F color) noexcept;
+        // Routine Description:
+        // - Helps convert a Direct2D ColorF into a DXGI RGBA
+        // Arguments:
+        // - color - Direct2D Color F
+        // Return Value:
+        // - DXGI RGBA
+        [[nodiscard]] constexpr DXGI_RGBA s_RgbaFromColorF(const D2D1_COLOR_F color) noexcept
+        {
+            return { color.r, color.g, color.b, color.a };
+        }
     };
 }

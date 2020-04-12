@@ -66,10 +66,13 @@
     <ClCompile Include="..\InputServices.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\windowtheme.cpp">
+    <ClCompile Include="..\windowUiaProvider.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\windowUiaProvider.cpp">
+    <ClCompile Include="..\screenInfoUiaProvider.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\uiaTextRange.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -125,10 +128,13 @@
     <ClInclude Include="..\InputServices.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\windowtheme.hpp">
+    <ClInclude Include="..\windowUiaProvider.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\windowUiaProvider.hpp">
+    <ClInclude Include="..\screenInfoUiaProvider.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\uiaTextRange.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
